@@ -17,11 +17,35 @@ python -m pip install -r requirements.txt
 
 ## Find the Camera
 
+For the desktop UI:
+
 ```powershell
-python camera_grab.py --scan
+python camera_grab.py --ui
 ```
 
-If your Canon is not index `0`, use the index shown by the scan:
+The UI lists available sources, auto-selects the first Canon/EOS source it can
+find, and previews the selected camera.
+
+On Windows, you can also double-click `camera-ui.bat`.
+
+If the Canon camera is not named directly, look for sources like `EOS Webcam
+Utility`, `USB Video Device`, or a generic `Camera 1`. Select each ready source
+and press `Start`, or use the manual index box.
+
+For the command line:
+
+```powershell
+python camera_grab.py --list
+```
+
+To open the Canon source by name:
+
+```powershell
+python camera_grab.py --name Canon
+```
+
+If you see more than one Canon-related source, use the exact index shown by the
+list:
 
 ```powershell
 python camera_grab.py --index 1
@@ -31,8 +55,8 @@ DirectShow is the default backend because it is usually the most reliable on
 Windows. If a source does not open, try:
 
 ```powershell
-python camera_grab.py --backend msmf --scan
-python camera_grab.py --backend auto --scan
+python camera_grab.py --backend msmf --list
+python camera_grab.py --backend auto --list
 ```
 
 ## Preview Controls
@@ -44,6 +68,7 @@ python camera_grab.py --backend auto --scan
 ## Examples
 
 ```powershell
+python camera_grab.py --name Canon --width 1280 --height 720
 python camera_grab.py --index 1 --width 1280 --height 720
 python camera_grab.py --index 1 --mirror
 ```

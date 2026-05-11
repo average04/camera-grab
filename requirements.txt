@@ -1,1 +1,3 @@
 opencv-python>=4.9
+Pillow>=10.0
+pygrabber>=0.2

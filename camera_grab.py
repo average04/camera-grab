@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,45 @@ def import_cv2():
         raise SystemExit(1)
 
     return cv2
+
+
+def get_directshow_devices() -> list[str]:
+    try:
+        from pygrabber.dshow_graph import FilterGraph
+    except ImportError:
+        print(
+            "Camera name listing needs pygrabber. Run:\n\n"
+            "  python -m pip install -r requirements.txt\n",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    return FilterGraph().get_input_devices()
+
+
+def get_windows_camera_devices() -> list[str]:
+    command = [
+        "powershell",
+        "-NoProfile",
+        "-Command",
+        "Get-PnpDevice -Class Camera,Image -PresentOnly | "
+        "Select-Object -ExpandProperty FriendlyName",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+
+    if result.returncode != 0:
+        return []
+
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
 def camera_backend(cv2, requested: str):
@@ -61,6 +101,48 @@ def scan_cameras(cv2, backend: int, limit: int) -> list[int]:
     return found
 
 
+def print_camera_sources(devices: list[str], open_indices: list[int]) -> None:
+    if devices:
+        print("DirectShow camera sources:")
+        for index, name in enumerate(devices):
+            status = "opens" if index in open_indices else "listed"
+            print(f"  {index}: {name} ({status})")
+        return
+
+    if open_indices:
+        print("Available camera indices:", ", ".join(str(i) for i in open_indices))
+    else:
+        print("No camera sources were found.")
+
+
+def resolve_camera_index(args: argparse.Namespace) -> int:
+    if not args.name:
+        return args.index
+
+    devices = get_directshow_devices()
+    query = args.name.casefold()
+    matches = [
+        (index, name)
+        for index, name in enumerate(devices)
+        if query in name.casefold()
+    ]
+
+    if not matches:
+        print(f"No camera source name contains {args.name!r}.", file=sys.stderr)
+        if devices:
+            print("Available sources:", file=sys.stderr)
+            for index, name in enumerate(devices):
+                print(f"  {index}: {name}", file=sys.stderr)
+        return -1
+
+    index, name = matches[0]
+    if len(matches) > 1:
+        print(f"Multiple matches found; using {index}: {name}")
+    else:
+        print(f"Using {index}: {name}")
+    return index
+
+
 def save_snapshot(frame, directory: Path) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -71,26 +153,28 @@ def run_preview(args: argparse.Namespace) -> int:
     cv2 = import_cv2()
     backend = camera_backend(cv2, args.backend)
 
-    if args.scan:
+    if args.list:
+        devices = get_directshow_devices() if args.backend == "dshow" else []
         cameras = scan_cameras(cv2, backend, args.scan_limit)
-        if cameras:
-            print("Available camera indices:", ", ".join(str(i) for i in cameras))
-        else:
-            print("No camera sources were found.")
+        print_camera_sources(devices, cameras)
         return 0
 
-    cap = open_camera(cv2, args.index, backend, args.width, args.height)
+    index = resolve_camera_index(args)
+    if index < 0:
+        return 1
+
+    cap = open_camera(cv2, index, backend, args.width, args.height)
     if cap is None:
         print(
-            f"Could not open camera index {args.index}. Try scanning with:\n\n"
-            f"  python camera_grab.py --scan --backend {args.backend}\n",
+            f"Could not open camera index {index}. Try listing sources with:\n\n"
+            f"  python camera_grab.py --list --backend {args.backend}\n",
             file=sys.stderr,
         )
         return 1
 
     print("Preview controls: S = snapshot, M = mirror, Q/Esc = quit")
     mirror = args.mirror
-    window_name = f"Camera Grab - index {args.index}"
+    window_name = f"Camera Grab - index {index}"
 
     try:
         while True:
@@ -123,11 +207,21 @@ def build_parser() -> argparse.ArgumentParser:
         description="Preview a Windows camera source, such as Canon EOS Webcam Utility."
     )
     parser.add_argument(
+        "--ui",
+        action="store_true",
+        help="Open the desktop camera source picker UI.",
+    )
+    parser.add_argument(
         "-i",
         "--index",
         type=int,
         default=0,
-        help="Camera index to open. Default: 0.",
+        help="Camera index to open when --name is not used. Default: 0.",
+    )
+    parser.add_argument(
+        "-n",
+        "--name",
+        help="Open the first DirectShow camera source whose name contains this text.",
     )
     parser.add_argument(
         "--backend",
@@ -149,9 +243,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for snapshots. Default: captures.",
     )
     parser.add_argument(
-        "--scan",
+        "--list",
         action="store_true",
-        help="Scan for available camera indices and exit.",
+        help="List available camera sources and exit.",
     )
     parser.add_argument(
         "--scan-limit",
@@ -165,6 +259,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if args.ui:
+        from camera_ui import main as ui_main
+
+        ui_main()
+        return 0
+
     return run_preview(args)
 
 
